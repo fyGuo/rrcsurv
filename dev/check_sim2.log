@@ -1,0 +1,12 @@
+90 fits (5 cells x 3 reps x 6), 3.5 min
+converged in both: 90; old only: 0; new only: 0; neither: 0
+max |b_new - b_old| (both converged): 2.75e-06;  max |se_new - se_old|: 2.84e-06
+        fit      d_b     d_se
+1     cox_A 5.87e-08 2.24e-10
+2     cox_M 2.36e-07 1.60e-08
+3     err_A 4.10e-07 2.04e-07
+4     err_M 2.75e-06 2.84e-06
+5 naive_cox 1.11e-09 3.39e-12
+6 naive_err 8.07e-07 4.49e-07
+
+time per replicate (6 fits): old 46 s, rrcsurv 55 s (median)

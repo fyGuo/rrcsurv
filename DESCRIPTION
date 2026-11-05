@@ -1,0 +1,23 @@
+Package: rrcsurv
+Type: Package
+Title: Risk Set Regression Calibration for Survival Models with Error-Prone Time-Varying Exposure
+Version: 0.0.0.9000
+Authors@R: c(
+    person("Yue", "Yang", email = "yueyang@g.harvard.edu", role = c("aut", "cre")),
+    person("Donna", "Spiegelman", role = "aut"),
+    person("Molin", "Wang", role = "aut"))
+Description: Corrects for measurement error in a cumulative (time-varying) exposure in Cox proportional
+    hazards and linear excess relative risk (ERR) survival models by risk set regression calibration
+    (RRC). Supports additive and multiplicative measurement error models fitted in a main/internal or
+    main/external validation study, confounder adjustment, and a sandwich variance that accounts for
+    the estimated calibration parameters.
+License: GPL (>= 2)
+URL: https://github.com/fyGuo/rrcsurv
+BugReports: https://github.com/fyGuo/rrcsurv/issues
+Encoding: UTF-8
+Depends: R (>= 4.1)
+Imports: stats, survival, utils
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.1

@@ -1,0 +1,17 @@
+300 replicates per cell, 19.6 min on 11 cores
+
+== cell 2: cox data, add error, RRC cox: 300 of 300 converged, mean 601 events, 7.1 s per fit
+  truth 1.000   mean 0.9926 (rel bias -0.7%)   median 1.0162   naive mean 0.6232 (validated years at the true dose)   MC SD 0.2888
+            mean_se se_over_sd coverage
+se_sandwich   0.292      1.012     0.94
+se_joint      0.292      1.013     0.94
+se_main       0.292      1.012     0.94
+se_model      0.292      1.012     0.95
+
+== cell 11: err data, mult error, RRC err: 300 of 300 converged, mean 600 events, 35.3 s per fit
+  truth 1.000   mean 1.0273 (rel bias +2.7%)   median 1.0217   naive mean 0.6534 (validated years at the true dose)   MC SD 0.3656
+            mean_se se_over_sd coverage
+se_sandwich   0.378      1.033    0.957
+se_joint      0.378      1.034    0.957
+se_main       0.377      1.032    0.957
+se_model      0.377      1.032    0.957
