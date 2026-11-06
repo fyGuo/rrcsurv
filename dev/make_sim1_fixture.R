@@ -2,8 +2,8 @@
 # error model, independent correlation) in person-time format, with the estimates of sim1_repro's
 # rrc_fit() (the code behind Table 1) as reference values.
 # run from rrcsurv/:  Rscript dev/make_sim1_fixture.R
-sim <- new.env(); sim$PROJ <- normalizePath("../sim1_repro")
-for (f in c("params.R", "exposure.R", "survival.R", "fit.R", "validation.R", "rrc.R")) {
+sim <- new.env(); sim$PROJ <- normalizePath("../measurementERROR_COX_ERR_RCC/sim1_repro")
+for (f in c("params.R", "exposure.R", "survival.R", "legacy/fit.R", "validation.R", "legacy/rrc.R")) {
   sys.source(file.path(sim$PROJ, "R", f), envir = sim)
 }
 n1 <- 600; n2 <- 200; n_pair <- 750

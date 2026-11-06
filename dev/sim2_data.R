@@ -3,7 +3,7 @@
 # Source from rrcsurv/ after setting SIM2_SCENARIO.
 
 # load.R uses source(), which evaluates in the global environment; rrc() uses its own namespace
-PROJ <- normalizePath("../sim2_repro")
+PROJ <- normalizePath("../measurementERROR_COX_ERR_RCC/sim2_repro")
 local({ owd <- setwd(PROJ); on.exit(setwd(owd)); source("R/load.R") })
 pkgload::load_all(".", quiet = TRUE)
 library(survival)

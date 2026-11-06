@@ -6,7 +6,7 @@
 # simulation (n1 = 1500, n2 = 400) to keep the fixture and the tests small.
 # run from rrcsurv/:  Rscript dev/make_sim2_fixture.R
 Sys.setenv(SIM2_SCENARIO = "beta1")
-PROJ <- normalizePath("../sim2_repro")
+PROJ <- normalizePath("../measurementERROR_COX_ERR_RCC/sim2_repro")
 local({ owd <- setwd(PROJ); on.exit(setwd(owd)); source("R/load.R") })
 n1 <- 1500; n2 <- 400
 

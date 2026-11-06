@@ -4,10 +4,11 @@
 #'
 #' Fits a Cox proportional hazards or linear excess relative risk (ERR) model for a cumulative
 #' exposure measured with error, correcting the error by risk set regression calibration (RRC;
-#' Yang, Spiegelman and Wang). The calibration model is fitted in the validation pairs at risk at
-#' each event time (merged until each risk set holds more than `min_pairs` pairs), every surrogate
-#' dose of the subjects at risk is replaced by its calibrated expectation, and the cumulative
-#' exposure is rebuilt for each risk set.
+#' Yang, Spiegelman and Wang). At each event time t the calibration model is fitted in the
+#' validation risk set: the pairs of the validation subjects still at risk at t whose dose has
+#' entered the cumulative exposure by t (see `dose_time`). Risk sets are merged until each holds
+#' more than `min_pairs` pairs. Every surrogate dose of the subjects at risk is replaced by its
+#' calibrated expectation under that risk set's model, and the cumulative exposure is rebuilt.
 #'
 #' @param formula survival formula `Surv(start, stop, event) ~ rrcx(dose, surrogate, lag) + ...`
 #'   on person-time data: one or more rows per subject, each covering (start, stop]; follow-up
@@ -22,8 +23,15 @@
 #'   (multiplicative, lognormal), where `c` is the true dose column of `validation`. The right
 #'   side may hold any terms of the surrogate dose and of covariates present in both data sets.
 #' @param model `"cox"`: lambda0(t) exp(beta x + gamma' Z); `"err"`: lambda0(t) exp(gamma' Z) (1 + beta x).
-#' @param min_pairs validation risk sets are merged until each holds more than `min_pairs` pairs.
-#'   `Inf` gives a single calibration model for all event times (ordinary regression calibration).
+#' @param min_pairs validation risk sets are merged, working back from the last event time, until
+#'   each merged set holds more than `min_pairs` pairs (a merged set holds the pairs of any of its
+#'   risk sets). `Inf` gives a single calibration model for all event times.
+#' @param dose_time name of the column of `validation` with the time each pair's dose was
+#'   received, on the time scale of `data`: the end of the dose's interval (for a dose recorded on
+#'   a person-time row (start, stop], its `stop`). The pair then enters the risk set at event time
+#'   t only if its dose is part of the cumulative exposure at t, `dose_time + lag < t`, as well as
+#'   its subject being at risk. A subject may have pairs at several times. `NULL` (default): all
+#'   pairs of the subjects at risk at t are used, whenever their dose was received.
 #' @param val_time for an external validation study, the name of the column of `validation` with
 #'   each pair's subject's end of follow-up, which defines the risk sets. For an internal
 #'   validation study (`NULL`, default) it is taken from `data` by `id`.
@@ -50,7 +58,8 @@
 #'   bootstrap if requested.
 #' @export
 rrc <- function(formula, data, id, validation, calibration, model = c("cox", "err"),
-                min_pairs = 20, val_time = NULL, variance = c("sandwich", "bootstrap", "none"),
+                min_pairs = 20, val_time = NULL, dose_time = NULL,
+                variance = c("sandwich", "bootstrap", "none"),
                 nboot = 200, joint = FALSE, naive = TRUE, surrogate_floor = NULL,
                 start = NULL, control = list()) {
   cl <- match.call()
@@ -79,52 +88,24 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
     if (!is.numeric(validation[[val_time]])) stop("the val_time column must be numeric")
     if (joint) warning("joint = TRUE applies to an internal validation study only; ignored", call. = FALSE)
   }
-
-  ## survival formula: response, exposure term, confounders
-  tt <- stats::terms(formula, specials = c("rrcx", "strata", "cluster", "tt", "frailty"))
-  if (attr(tt, "response") != 1) stop("formula needs a Surv() response")
-  if (!is.null(attr(tt, "offset"))) stop("offset() terms are not supported")
-  for (s in c("strata", "cluster", "tt", "frailty")) {
-    if (!is.null(attr(tt, "specials")[[s]])) stop(s, "() terms are not supported")
-  }
-  sp <- attr(tt, "specials")$rrcx
-  if (length(sp) != 1) stop("formula needs exactly one rrcx() term")
-  y <- eval_response(formula, data, env)
-  ex <- eval_rrcx(attr(tt, "variables")[[sp + 1]], data, env)
-  labs <- attr(tt, "term.labels")
-  kx <- which(vapply(labs, function(l) grepl("rrcx(", l, fixed = TRUE), logical(1)))
-  if (length(kx) != 1 || grepl(":", labs[kx], fixed = TRUE)) {
-    stop("rrcx() must enter the formula once, as a main effect")
-  }
-  Z <- confounder_matrix(labs[-kx], data, env)
-  if (!is.null(start) && (!is.numeric(start) || length(start) != 1 + ncol(Z) || anyNA(start))) {
-    stop("start must hold ", 1 + ncol(Z), " numbers: the exposure, then ",
-         if (ncol(Z)) paste(colnames(Z), collapse = ", ") else "no confounders")
+  if (!is.null(dose_time)) {
+    if (!is.character(dose_time) || length(dose_time) != 1 || !dose_time %in% names(validation)) {
+      stop("dose_time must name a column of validation")
+    }
+    if (!is.numeric(validation[[dose_time]])) stop("the dose_time column must be numeric")
+    if (anyNA(validation[[dose_time]])) {
+      stop(sum(is.na(validation[[dose_time]])), " validation pair(s) have a missing dose_time")
+    }
   }
 
-  start_t <- y[, 1]; stop_t <- y[, 2]; event <- y[, 3]
-  idv <- data[[id]]
-  if (anyNA(idv)) stop(sum(is.na(idv)), " row(s) of data have a missing id")
-  if (anyNA(ex$x) || any(!is.finite(ex$x))) {
-    stop(sum(!is.finite(ex$x)), " row(s) of data have a missing or non-finite rrcx() exposure")
-  }
+  ## survival data: response, exposure term, confounders, risk sets
+  pd <- prep_survival(formula, data, id, start, env)
+  ex <- pd$ex; Z <- pd$Z; o <- pd$o; idv <- pd$idv; sid <- pd$sid
+  start_t <- pd$start_t; stop_t <- pd$stop_t; event <- pd$event
+  dose <- pd$dose; surr <- pd$surr; first <- pd$first; k <- pd$k; rs <- pd$rs; Zp <- pd$Zp
   if (!any(ex$surrogate)) {
     warning("no rows are flagged as surrogate in rrcx(); the RRC fit equals the naive fit", call. = FALSE)
   }
-  if (!any(event == 1)) stop("no events in data")
-
-  ## sort by subject and time; one event per subject, at the end of its follow-up
-  o <- order(idv, start_t)
-  uids <- unique(idv[o])
-  sid <- match(idv, uids)[o]
-  start_t <- start_t[o]; stop_t <- stop_t[o]; event <- event[o]
-  dose <- ex$x[o]; surr <- ex$surrogate[o]; Z <- Z[o, , drop = FALSE]
-  check_subjects(sid, event, start_t, stop_t, uids)
-  first <- match(sid, sid)
-  k <- prefix_index(sid, start_t, stop_t, ex$lag)
-
-  rs <- rs_build(start_t, stop_t, event)
-  Zp <- Z[rs$row, , drop = FALSE]
 
   ## naive fit: observed doses taken at face value
   naive_fit <- NULL
@@ -169,13 +150,18 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
             call. = FALSE)
   }
   vy <- des$y[ok]; Mv <- des$Mv[ok, , drop = FALSE]; vT <- vT[ok]; vid <- validation[[id]][ok]
-  if (length(vy) <= ncol(Mv)) {
-    stop(sprintf("too few usable validation pairs (%d) for a calibration model with %d parameters",
-                 length(vy), ncol(Mv)))
+  vu <- if (is.null(dose_time)) rep(-Inf, length(vy)) else validation[[dose_time]][ok]
+  pr <- pair_ranges(rs$time, vT, vu, ex$lag)       # event times whose risk set holds each pair
+  n_unused <- sum(pr$lo > pr$hi)
+  n_use <- length(vy) - n_unused
+  if (n_use <= ncol(Mv)) {
+    stop(sprintf("too few usable validation pairs (%d%s) for a calibration model with %d parameters",
+                 n_use, if (n_unused > 0) sprintf("; %d more are in no risk set", n_unused) else "",
+                 ncol(Mv)))
   }
-  if (is.finite(min_pairs) && length(vy) <= min_pairs) {
+  if (is.finite(min_pairs) && n_use <= min_pairs) {
     warning(sprintf("only %d usable validation pairs, not more than min_pairs = %g: a single calibration model is used for all event times",
-                    length(vy), min_pairs), call. = FALSE)
+                    n_use, min_pairs), call. = FALSE)
   }
   si <- which(surr)
   if (length(si) && !all(is.finite(des$Mm[si, , drop = FALSE]))) {
@@ -184,12 +170,11 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
   }
 
   ## risk-set groups and calibration fits
-  np <- length(vT) - findInterval(rs$time, sort(vT), left.open = TRUE)   # pairs with T >= t
-  grp <- rrc_groups(np, min_pairs)
+  grp <- rrc_groups(pr$lo, pr$hi, length(rs$time), min_pairs)
   G <- max(grp)
   fits <- lapply(seq_len(G), function(g) {
-    t1 <- rs$time[which(grp == g)[1]]
-    S <- which(vT >= t1)                                  # nested risk sets: union = earliest
+    eg <- which(grp == g)
+    S <- group_pairs(pr$lo, pr$hi, min(eg), max(eg))     # union of the group's risk sets
     f <- fit_calibration_group(vy, Mv, S)
     f$n_subjects <- length(unique(vid[S]))
     f
@@ -209,7 +194,7 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
   internal <- is.null(val_time)
   variances <- list(model = fit$vcov)
   if (variance != "none") {
-    sw <- rrc_sandwich(fit, xrrc, rs, sid, unique(idv[o]), grp, fits, k, first, surr, dose,
+    sw <- rrc_sandwich(fit, xrrc, rs, sid, pd$uids, grp, fits, k, first, surr, dose,
                        des$Mm, Mv, vid, cal$scale, internal, joint)
     variances$sandwich <- sw$vcov
     variances$sandwich_separate <- sw$vcov_separate
@@ -232,7 +217,7 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
   boot <- NULL
   if (variance == "bootstrap") {
     boot <- rrc_bootstrap(formula, data, id, validation, calibration, model, min_pairs, val_time,
-                          nboot, fit$coef, ctl, surrogate_floor)
+                          nboot, fit$coef, ctl, surrogate_floor, dose_time)
     variances$bootstrap <- boot$vcov
     if (boot$n_failed > 0) {
       warning(sprintf("%d of %d bootstrap samples failed or did not converge and were left out",
@@ -249,10 +234,13 @@ rrc <- function(formula, data, id, validation, calibration, model = c("cox", "er
     fit = fit, naive = naive_fit, model = model, scale = cal$scale,
     exposure = ex$name, lag = ex$lag, calibration = cal$formula, groups = gtab,
     n = c(subjects = max(sid), rows = length(sid), events = sum(rs$d), event_times = length(rs$time),
-          pairs = length(vy), pairs_dropped = n_drop, surrogates_floored = n_floored),
-    min_pairs = min_pairs, surrogate_floor = surrogate_floor, internal_validation = internal, call = cl,
+          pairs = length(vy), pairs_dropped = n_drop, pairs_unused = n_unused,
+          surrogates_floored = n_floored),
+    min_pairs = min_pairs, dose_time = dose_time, surrogate_floor = surrogate_floor,
+    internal_validation = internal, call = cl,
     internal = list(rs = rs, Zp = Zp, xrrc = xrrc, grp = grp, fits = fits, k = k, first = first,
-                    surr = surr, dose = dose, Mm = des$Mm, Mv = Mv, vy = vy, vid = vid, sid = sid)
+                    surr = surr, dose = dose, Mm = des$Mm, Mv = Mv, vy = vy, vid = vid, sid = sid,
+                    pair_lo = pr$lo, pair_hi = pr$hi)
   ), class = "rrc")
 }
 
@@ -287,7 +275,7 @@ rrc_xhat <- function(fits, grp, rs, dose, surr, Mm, scale, k, first) {
 # Nonparametric bootstrap over subjects. Internal validation: a subject's person-time rows and
 # validation pairs are resampled together; external: main and validation subjects separately.
 rrc_bootstrap <- function(formula, data, id, validation, calibration, model, min_pairs, val_time,
-                          nboot, est, ctl, surrogate_floor = NULL) {
+                          nboot, est, ctl, surrogate_floor = NULL, dose_time = NULL) {
   rows <- split(seq_len(nrow(data)), as.character(data[[id]]))
   vrows <- split(seq_len(nrow(validation)), as.character(validation[[id]]))
   ids <- names(rows); vids <- names(vrows)
@@ -310,7 +298,8 @@ rrc_bootstrap <- function(formula, data, id, validation, calibration, model, min
     vb <- validation[v$rows, , drop = FALSE]; vb[[id]] <- v$new
     f <- tryCatch(suppressWarnings(
       rrc(formula, db, id, vb, calibration, model = model, min_pairs = min_pairs,
-          val_time = val_time, variance = "none", naive = FALSE, surrogate_floor = surrogate_floor,
+          val_time = val_time, dose_time = dose_time, variance = "none", naive = FALSE,
+          surrogate_floor = surrogate_floor,
           start = est, control = ctl)),
       error = function(e) NULL)
     if (!is.null(f) && f$fit$converged) res[b, ] <- f$coefficients

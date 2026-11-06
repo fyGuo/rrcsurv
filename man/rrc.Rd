@@ -13,6 +13,7 @@ rrc(
   model = c("cox", "err"),
   min_pairs = 20,
   val_time = NULL,
+  dose_time = NULL,
   variance = c("sandwich", "bootstrap", "none"),
   nboot = 200,
   joint = FALSE,
@@ -42,12 +43,20 @@ side may hold any terms of the surrogate dose and of covariates present in both 
 
 \item{model}{\code{"cox"}: lambda0(t) exp(beta x + gamma' Z); \code{"err"}: lambda0(t) exp(gamma' Z) (1 + beta x).}
 
-\item{min_pairs}{validation risk sets are merged until each holds more than \code{min_pairs} pairs.
-\code{Inf} gives a single calibration model for all event times (ordinary regression calibration).}
+\item{min_pairs}{validation risk sets are merged, working back from the last event time, until
+each merged set holds more than \code{min_pairs} pairs (a merged set holds the pairs of any of its
+risk sets). \code{Inf} gives a single calibration model for all event times.}
 
 \item{val_time}{for an external validation study, the name of the column of \code{validation} with
 each pair's subject's end of follow-up, which defines the risk sets. For an internal
 validation study (\code{NULL}, default) it is taken from \code{data} by \code{id}.}
+
+\item{dose_time}{name of the column of \code{validation} with the time each pair's dose was
+received, on the time scale of \code{data}: the end of the dose's interval (for a dose recorded on
+a person-time row (start, stop], its \code{stop}). The pair then enters the risk set at event time
+t only if its dose is part of the cumulative exposure at t, \code{dose_time + lag < t}, as well as
+its subject being at risk. A subject may have pairs at several times. \code{NULL} (default): all
+pairs of the subjects at risk at t are used, whenever their dose was received.}
 
 \item{variance}{\code{"sandwich"} (default): the sandwich variance of Yang, Spiegelman and Wang,
 which accounts for the estimated calibration parameters; \code{"bootstrap"}: resample subjects
@@ -82,8 +91,9 @@ bootstrap if requested.
 \description{
 Fits a Cox proportional hazards or linear excess relative risk (ERR) model for a cumulative
 exposure measured with error, correcting the error by risk set regression calibration (RRC;
-Yang, Spiegelman and Wang). The calibration model is fitted in the validation pairs at risk at
-each event time (merged until each risk set holds more than \code{min_pairs} pairs), every surrogate
-dose of the subjects at risk is replaced by its calibrated expectation, and the cumulative
-exposure is rebuilt for each risk set.
+Yang, Spiegelman and Wang). At each event time t the calibration model is fitted in the
+validation risk set: the pairs of the validation subjects still at risk at t whose dose has
+entered the cumulative exposure by t (see \code{dose_time}). Risk sets are merged until each holds
+more than \code{min_pairs} pairs. Every surrogate dose of the subjects at risk is replaced by its
+calibrated expectation under that risk set's model, and the cumulative exposure is rebuilt.
 }

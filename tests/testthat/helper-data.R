@@ -60,7 +60,8 @@ sim_me <- function(scale = "additive", model = "cox", n = 500, n_val = 600, seed
     dat$dose * exp(0.1 + 0.2 * dat$z1 + rnorm(nrow(dat), 0, 0.4))
   }
   v <- sample(nrow(dat), n_val)
-  val <- data.frame(id = dat$id[v], c = dat$dose[v], C = dat$C[v], z1 = dat$z1[v], z2 = dat$z2[v])
+  val <- data.frame(id = dat$id[v], c = dat$dose[v], C = dat$C[v], z1 = dat$z1[v], z2 = dat$z2[v],
+                    u = dat$stop[v])                  # u: when the dose was received (row end)
   dat$dose <- dat$x <- NULL
   list(dat = dat, val = val)
 }

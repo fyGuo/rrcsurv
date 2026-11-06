@@ -60,10 +60,52 @@ test_that("cumulative exposure honours the lag", {
   }
 })
 
+# nested risk sets (no dose times) holding np[e] pairs at event time e: every pair starts at 1
+nested <- function(np) {
+  hi <- rep(seq_along(np), np - c(np[-1], 0))
+  list(lo = rep(1L, length(hi)), hi = hi)
+}
+groups_of <- function(r, E, min_pairs) rrcsurv:::rrc_groups(r$lo, r$hi, E, min_pairs)
+
 test_that("risk-set groups merge backwards until each has more than min_pairs pairs", {
-  expect_equal(rrcsurv:::rrc_groups(c(30, 25, 15, 10, 5), 20), c(1L, 2L, 2L, 2L, 2L))
-  expect_equal(rrcsurv:::rrc_groups(c(30, 25, 21), 20), 1:3)
-  expect_equal(rrcsurv:::rrc_groups(c(30, 25, 21), Inf), c(1L, 1L, 1L))
+  expect_equal(groups_of(nested(c(30, 25, 15, 10, 5)), 5, 20), c(1L, 2L, 2L, 2L, 2L))
+  expect_equal(groups_of(nested(c(30, 25, 21)), 3, 20), 1:3)
+  expect_equal(groups_of(nested(c(30, 25, 21)), 3, Inf), c(1L, 1L, 1L))
+})
+
+test_that("non-nested risk sets: a group holds the union, and a small earliest group joins the next", {
+  # 5 pairs only at event time 1, 30 only at 2, 25 only at 3
+  r <- list(lo = rep(1:3, c(5, 30, 25)), hi = rep(1:3, c(5, 30, 25)))
+  expect_equal(groups_of(r, 3, 20), c(1L, 1L, 2L))
+  # 15 pairs at 3, 10 spanning 2..3, 30 at 1: event time 3 alone has 25 > 20; 2 has 10 and
+  # merges with 1 (10 + 30 = 40), never counting a pair twice
+  r <- list(lo = c(rep(3, 15), rep(2, 10), rep(1, 30)), hi = c(rep(3, 15), rep(3, 10), rep(1, 30)))
+  expect_equal(groups_of(r, 3, 20), c(1L, 1L, 2L))
+  expect_equal(groups_of(r, 3, 24), c(1L, 1L, 2L))
+  expect_equal(groups_of(r, 3, 25), c(1L, 1L, 1L))
+  # pairs in no risk set (lo > hi) are ignored
+  r2 <- list(lo = c(r$lo, rep(3, 50)), hi = c(r$hi, rep(2, 50)))
+  expect_equal(groups_of(r2, 3, 20), groups_of(r, 3, 20))
+})
+
+test_that("rrc_groups matches a brute-force backward merge on random pair ranges", {
+  brute <- function(lo, hi, E, m) {
+    grp <- integer(E); g <- 0L; b <- NA
+    for (e in E:1) {
+      if (is.na(b)) { g <- g + 1L; b <- e }
+      grp[e] <- g
+      if (sum(lo <= b & hi >= e & lo <= hi) > m) b <- NA
+    }
+    if (!is.na(b) && g > 1L) { grp[grp == g] <- g - 1L; g <- g - 1L }
+    g + 1L - grp
+  }
+  set.seed(7)
+  for (rep in 1:200) {
+    E <- sample(1:12, 1); P <- sample(0:60, 1)
+    lo <- sample(1:(E + 1), P, replace = TRUE); hi <- pmin(E, lo + sample(-1:E, P, replace = TRUE))
+    m <- sample(c(0, 3, 8, 20), 1)
+    expect_equal(rrcsurv:::rrc_groups(lo, hi, E, m), brute(lo, hi, E, m))
+  }
 })
 
 test_that("input problems give clear messages", {

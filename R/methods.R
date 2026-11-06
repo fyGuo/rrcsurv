@@ -69,17 +69,39 @@ variance_label <- function(object, type = NULL) {
 #' @rdname rrc-methods
 #' @export
 confint.rrc <- function(object, parm, level = 0.95, type = NULL, ...) {
-  cf <- coef(object)
+  wald_ci(coef(object), vcov(object, type), parm, level)
+}
+
+# Wald intervals estimate +/- z SE
+wald_ci <- function(cf, V, parm, level) {
   if (missing(parm)) parm <- names(cf) else if (is.numeric(parm)) parm <- names(cf)[parm]
-  if (anyNA(parm) || !all(parm %in% names(cf))) stop("parm must name or index coefficients of the fit")
+  if (anyNA(parm) || !all(parm %in% names(cf))) stop("parm must name or index coefficients of the fit", call. = FALSE)
   check_number(level, "level", lower = 0)
-  if (level >= 1) stop("level must be below 1")
-  se <- sqrt(diag(vcov(object, type)))[parm]
+  if (level >= 1) stop("level must be below 1", call. = FALSE)
+  se <- sqrt(diag(V))[parm]
   a <- (1 - level) / 2
   z <- stats::qnorm(1 - a)
   ci <- cbind(cf[parm] - z * se, cf[parm] + z * se)
   dimnames(ci) <- list(parm, paste(format(100 * c(a, 1 - a), trim = TRUE, scientific = FALSE, digits = 3), "%"))
   ci
+}
+
+# estimate, SE, Wald z and p
+coef_table <- function(cf, V) {
+  se <- sqrt(diag(V))
+  z <- cf / se
+  cbind(coef = cf, `se(coef)` = se, z = z, `Pr(>|z|)` = 2 * stats::pnorm(-abs(z)))
+}
+
+# conf.int table: exp(coef) for Cox terms and ERR confounders, the ERR per unit for the ERR exposure
+ci_table <- function(object, conf.level, type) {
+  cf <- coef(object)
+  ci <- confint(object, level = conf.level, type = type)
+  tr <- if (object$model == "cox") rep(TRUE, length(cf)) else names(cf) != object$exposure
+  conf <- cbind(ifelse(tr, exp(cf), cf), ifelse(cbind(tr, tr), exp(ci), ci))
+  dimnames(conf) <- list(names(cf), c(if (object$model == "cox") "exp(coef)" else "estimate",
+                                      paste0(c("lower .", "upper ."), round(100 * conf.level))))
+  conf
 }
 
 #' @rdname rrc-methods
@@ -89,18 +111,9 @@ nobs.rrc <- function(object, ...) unname(object$n["events"])
 #' @rdname rrc-methods
 #' @export
 summary.rrc <- function(object, conf.level = 0.95, type = NULL, ...) {
-  cf <- coef(object)
-  se <- sqrt(diag(vcov(object, type)))
-  z <- cf / se
-  tab <- cbind(coef = cf, `se(coef)` = se, z = z, `Pr(>|z|)` = 2 * stats::pnorm(-abs(z)))
-  ci <- confint(object, level = conf.level, type = type)
+  tab <- coef_table(coef(object), vcov(object, type))
+  conf <- ci_table(object, conf.level, type)
   ex <- object$exposure
-  tr <- if (object$model == "cox") rep(TRUE, length(cf)) else names(cf) != ex
-  est <- ifelse(tr, exp(cf), cf)
-  ci <- ifelse(cbind(tr, tr), exp(ci), ci)
-  conf <- cbind(est, ci)
-  dimnames(conf) <- list(names(cf), c(if (object$model == "cox") "exp(coef)" else "estimate",
-                                      paste0(c("lower .", "upper ."), round(100 * conf.level))))
   naive <- NULL
   if (!is.null(object$naive)) {
     nse <- sqrt(diag(object$naive$vcov))
@@ -111,7 +124,8 @@ summary.rrc <- function(object, conf.level = 0.95, type = NULL, ...) {
     call = object$call, model = object$model, scale = object$scale, exposure = ex, lag = object$lag,
     calibration = object$calibration, coefficients = tab, conf.int = conf, conf.level = conf.level,
     naive = naive, variance = variance_label(object, type), n = object$n, groups = g,
-    min_pairs = object$min_pairs, surrogate_floor = object$surrogate_floor, internal_validation = object$internal_validation,
+    min_pairs = object$min_pairs, dose_time = object$dose_time, surrogate_floor = object$surrogate_floor,
+    internal_validation = object$internal_validation,
     converged = object$fit$converged, boundary = object$fit$boundary,
     diverged = isTRUE(object$fit$diverged), iter = object$fit$iter
   ), class = "summary.rrc")
@@ -136,6 +150,12 @@ print.summary.rrc <- function(x, digits = max(3L, getOption("digits") - 3L), ...
               if (x$internal_validation) "Internal" else "External", x$n["pairs"],
               if (x$n["pairs_dropped"] > 0) sprintf(" (%d dropped)", x$n["pairs_dropped"]) else "",
               nrow(g), x$min_pairs, min(g$n_pairs), max(g$n_pairs)))
+  cat("Validation risk set at t: pairs of subjects at risk at t ",
+      if (!is.null(x$dose_time)) sprintf("with dose received before t%s (dose_time = \"%s\")",
+                                         if (x$lag > 0) sprintf(" - %g", x$lag) else "", x$dose_time)
+      else "(any dose time)",
+      if (isTRUE(x$n["pairs_unused"] > 0)) sprintf("; %d pair(s) in no risk set", x$n["pairs_unused"]),
+      "\n", sep = "")
   if (isTRUE(x$n["surrogates_floored"] > 0)) {
     cat(sprintf("%d surrogate dose(s) in data raised to surrogate_floor = %g\n",
                 x$n["surrogates_floored"], x$surrogate_floor))

@@ -2,8 +2,8 @@
 # sim1_repro's pl_fit() (the code behind Table 1) for the naive and true-exposure fits.
 # run from rrcsurv/:  Rscript dev/check_engine_vs_sim1.R
 pkgload::load_all(".", quiet = TRUE)
-sim <- new.env(); sim$PROJ <- normalizePath("../sim1_repro")
-for (f in c("params.R", "exposure.R", "survival.R", "fit.R")) sys.source(file.path("../sim1_repro/R", f), envir = sim)
+sim <- new.env(); sim$PROJ <- normalizePath("../measurementERROR_COX_ERR_RCC/sim1_repro")
+for (f in c("params.R", "exposure.R", "survival.R", "legacy/fit.R")) sys.source(file.path("../measurementERROR_COX_ERR_RCC/sim1_repro/R", f), envir = sim)
 
 # sim1 matrices -> person-time rows: subject i, interval (j-1, j] carries cumulative exposure x_{j-1}
 to_person_time <- function(time, D, x) {

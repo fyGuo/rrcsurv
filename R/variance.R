@@ -48,10 +48,7 @@ rrc_score_parts <- function(fit, x, rs, sid, grp, fits, k, first, surr, dose, Mm
   am <- pt$a - pt$m[uid, , drop = FALSE]      # a_j - m_t
 
   # robust score: sum over a subject's pairs of [case] (a - m) - d w (a - m)
-  L <- -w * am
-  L[case, ] <- L[case, ] + am[case, ]
-  U <- rowsum(L, sid[rs$row], reorder = TRUE)
-  Ui <- matrix(0, max(sid), p); Ui[as.integer(rownames(U)), ] <- U
+  Ui <- robust_scores(fit, rs, sid)
 
   # dU/dx_j = [case] g1_j - d w_j (g1_j + (a_j - m_t) g2_j), with g1 = d a / dx, g2 = d log r / dx
   #   Cox: g1 = e_x, g2 = beta;  ERR: g1 = e_x / (1 + beta x)^2, g2 = beta / (1 + beta x)
@@ -116,13 +113,6 @@ rrc_sandwich <- function(fit, x, rs, sid, sub_ids, grp, fits, k, first, surr, do
                          scale, internal, joint = FALSE) {
   sp <- rrc_score_parts(fit, x, rs, sid, grp, fits, k, first, surr, dose, Mm, scale)
   Sv <- rrc_validation_scores(sp$Ustar, fits, Mv, vid, scale)
-  I <- fit$parts$I
-  R <- tryCatch(chol(I), error = function(e) NULL)
-  if (is.null(R)) {
-    p <- ncol(I); na <- matrix(NA_real_, p, p)
-    return(list(vcov = na, vcov_main = na))
-  }
-  Iinv <- chol2inv(R)
   meat_main <- crossprod(sp$Ui)
   meat_sep <- meat_main + crossprod(Sv)
   meat_joint <- NULL
@@ -132,9 +122,7 @@ rrc_sandwich <- function(fit, x, rs, sid, sub_ids, grp, fits, k, first, surr, do
     H[m, ] <- H[m, ] + Sv
     meat_joint <- crossprod(H)
   }
-  o <- if (is.null(fit$order)) seq_len(ncol(I)) else fit$order
-  nm <- names(fit$coef)
-  fix <- function(M) { V <- (Iinv %*% M %*% Iinv)[o, o, drop = FALSE]; dimnames(V) <- list(nm, nm); V }
+  fix <- function(M) sandwich_from_meat(fit, M)
   sep <- fix(meat_sep)
   jnt <- if (is.null(meat_joint)) NULL else fix(meat_joint)
   list(vcov = if (joint && internal) jnt else sep, vcov_separate = sep, vcov_joint = jnt,

@@ -2,7 +2,8 @@
 
 Scripts used to validate rrcsurv against the reference implementations of the paper's simulations.
 They are not part of the package build (`.Rbuildignore`) and need the analysis repository
-(`sim1_repro/` and `sim2_repro/` next to `rrcsurv/`), so they run only in that layout, from `rrcsurv/`.
+[measurementERROR_COX_ERR_RCC](https://github.com/fyGuo/measurementERROR_COX_ERR_RCC) cloned next to
+`rrcsurv/` (its `sim1_repro/` and `sim2_repro/` folders), so they run only in that layout, from `rrcsurv/`.
 
 | Script | What it checks | Result |
 |---|---|---|
