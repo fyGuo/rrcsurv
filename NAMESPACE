@@ -14,6 +14,7 @@ S3method(summary,cumfit)
 S3method(summary,rrc)
 S3method(vcov,cumfit)
 S3method(vcov,rrc)
+export(Surv)
 export(cumfit)
 export(rrc)
 export(rrcx)
@@ -23,3 +24,4 @@ importFrom(stats,
   nobs,
   vcov
 )
+importFrom(survival,Surv)

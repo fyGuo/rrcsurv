@@ -97,3 +97,23 @@ entered the cumulative exposure by t (see \code{dose_time}). Risk sets are merge
 more than \code{min_pairs} pairs. Every surrogate dose of the subjects at risk is replaced by its
 calibrated expectation under that risk set's model, and the cumulative exposure is rebuilt.
 }
+\examples{
+# internal validation study: validated years carry the true dose (surrogate = FALSE);
+# the measurement error depends on smoking, so smoke enters the calibration model
+fit <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+           data = rrc_main, id = "id", validation = rrc_validation,
+           calibration = log(c) ~ log(dose) + smoke, dose_time = "year")
+fit
+summary(fit)
+confint(fit)
+
+# additive error model; model = "err" would fit the linear ERR model instead
+fit_add <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+               data = rrc_main, id = "id", validation = rrc_validation,
+               calibration = c ~ dose + smoke, dose_time = "year")
+coef(fit_add)
+}
+\seealso{
+\code{\link[=cumfit]{cumfit()}} for the uncorrected fit, \link{rrc-methods} for \code{summary()}, \code{vcov()} and
+\code{confint()}, \link{rrc_main} for the example data, and \code{vignette("rrcsurv")}.
+}

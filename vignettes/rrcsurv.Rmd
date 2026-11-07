@@ -1,0 +1,264 @@
+---
+title: "Risk set regression calibration with rrcsurv"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Risk set regression calibration with rrcsurv}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+rrcsurv fits Cox and linear excess relative risk (ERR) models for a **cumulative exposure** whose
+yearly doses are measured with error, and corrects the error by **risk set regression calibration**
+(RRC; Yang, Spiegelman and Wang). This vignette walks through an analysis of the example data that
+come with the package.
+
+```{r}
+library(rrcsurv)
+```
+
+`library(rrcsurv)` also makes `Surv()` available, so the survival package need not be attached.
+
+## The problem
+
+Each subject receives a dose c(u) at each time u, and the hazard at time t depends on the
+cumulative exposure, the dose received before t:
+
+- Cox: λ(t) = λ0(t) exp(β x(t) + γ'Z),
+- ERR: λ(t) = λ0(t) exp(γ'Z) (1 + β x(t)),
+
+with x(t) = Σ_{u < t} c(u). The study records only a surrogate C(u) for most doses. Summing
+surrogates and fitting the model as if they were the true doses (the *naive* analysis) usually
+biases β, most often towards 0.
+
+A validation study measures both c and C for some doses. RRC uses it in three steps:
+
+1. At each event time t, fit a measurement error model for E(c | C, covariates) to the validation
+   pairs in the **validation risk set** of t: the pairs of subjects still at risk at t whose dose
+   was received before t.
+2. Replace every surrogate dose of the subjects at risk at t by its calibrated value under that
+   model and rebuild their cumulative exposure.
+3. Fit the risk model with these risk-set-specific exposures. A sandwich variance accounts for
+   the estimated calibration parameters.
+
+Fitting the calibration model within risk sets matters because those still at risk at a late
+event time are a selected group (they survived) and their relation between c and C may differ from
+that of the whole cohort.
+
+## Data layout
+
+The **main study** is in person-time format: one row per subject and interval (start, stop], with
+the dose received in that interval (not the running total). `rrc_main` follows 1500 workers for up
+to 25 years:
+
+```{r}
+head(rrc_main, 4)
+c(rows = nrow(rrc_main), workers = length(unique(rrc_main$id)), events = sum(rrc_main$event))
+```
+
+- `dose` is the dose as known to the analyst: the surrogate C in most years, the true c in the
+  years that were validated.
+- `surrogate` says which: `TRUE` for a surrogate, `FALSE` for a validated year. Only surrogate doses
+  are calibrated.
+- `dose_true` is the true dose of every year. It exists only because the data are simulated; we
+  use it to show what the corrected analysis should recover.
+
+The **validation study** has one row per validated dose: the true dose `c`, the surrogate under
+the same name as the exposure in the main study (`dose`), any covariates of the measurement
+error model, and when the dose was received (`year`, the `stop` of its row in the main study):
+
+```{r}
+head(rrc_validation, 4)
+c(pairs = nrow(rrc_validation), workers = length(unique(rrc_validation$id)))
+```
+
+Here the validation study is **internal**: its workers belong to the main study. A worker may have
+several validated years.
+
+## Naive and true-dose analyses
+
+`cumfit()` fits the risk model without correction. The `rrcx()` term marks the exposure: it builds
+the cumulative exposure from the doses of each row.
+
+```{r}
+naive <- cumfit(Surv(start, stop, event) ~ rrcx(dose) + smoke, data = rrc_main, id = "id")
+truth <- cumfit(Surv(start, stop, event) ~ rrcx(dose_true) + smoke, data = rrc_main, id = "id")
+rbind(naive = coef(naive), true_dose = coef(truth))
+```
+
+The data were generated with β = 0.25 for the exposure and 0.5 for smoking. The fit on the true
+doses recovers both; the naive fit halves the exposure effect and loses the smoking effect,
+because the measurement error differs between smokers and non-smokers.
+
+## Risk set regression calibration
+
+`rrc()` takes the same formula, plus the validation study and the measurement error model. The
+`surrogate` argument of `rrcx()` names the column that flags the surrogate doses.
+
+```{r}
+fit <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+           data = rrc_main, id = "id",
+           validation = rrc_validation,
+           calibration = log(c) ~ log(dose) + smoke,
+           dose_time = "year")
+summary(fit)
+```
+
+The corrected estimates are close to the true-dose fit. The summary also reports:
+
+- how the validation risk sets were formed: here 1159 pairs in 24 groups (see below). 126 pairs
+  are in no risk set: their dose was received after their subject's last event time at risk;
+- the calibration parameters across the risk-set groups: their spread shows how much the
+  measurement error model changes over follow-up;
+- the naive estimates, for comparison.
+
+`coef()`, `vcov()`, `confint()` and `nobs()` (the number of events) work as usual:
+
+```{r}
+confint(fit)
+```
+
+### The measurement error model
+
+The left side of `calibration` sets the error structure:
+
+- `c ~ ...`: **additive**, E(c | C, W) = α'M, with M the right-side terms;
+- `log(c) ~ ...`: **multiplicative** (lognormal), E(c | C, W) = exp(α'M + σ²/2).
+
+The right side can hold any terms in the surrogate and in covariates present in both data sets.
+Here the error depends on smoking. Leaving smoking out of the calibration model calibrates
+smokers' doses as if they were non-smokers' and biases the smoking effect:
+
+```{r}
+fit_nosmoke <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+                   data = rrc_main, id = "id", validation = rrc_validation,
+                   calibration = log(c) ~ log(dose), dose_time = "year", naive = FALSE)
+rbind(with_smoke = coef(fit), without_smoke = coef(fit_nosmoke))
+```
+
+### Which validation pairs calibrate the exposure at time t
+
+The cumulative exposure at an event time t is the sum of the doses received before t, so the
+calibration model at t should describe those doses for the subjects at risk at t. With `dose_time`,
+a validation pair enters the risk set of t when its subject is still at risk at t **and** its
+dose was received before t (before t − lag with a lagged exposure). One calibration model per
+risk set is applied to all the past doses of the subjects at risk, which assumes that the error
+model does not change with the time of the dose, only with the survival selection.
+
+Without `dose_time` (`NULL`), every pair of the subjects at risk is used, whenever its dose was
+received.
+
+Late in follow-up few subjects remain at risk, so neighbouring risk sets are merged, working back
+from the last event time, until each group holds more than `min_pairs` pairs (default 20). The
+`groups` table lists them:
+
+```{r}
+head(fit$groups[, c("group", "t_first", "t_last", "n_events", "n_pairs")])
+```
+
+`min_pairs = Inf` fits a single calibration model to all pairs (ordinary regression calibration
+applied to the cumulative exposure).
+
+### An additive error model
+
+`c ~ dose + smoke` models the error on the original scale. These data were generated with a
+multiplicative error, so the additive model is misspecified, but with an internal validation study
+it still removes most of the bias here:
+
+```{r}
+fit_add <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+               data = rrc_main, id = "id", validation = rrc_validation,
+               calibration = c ~ dose + smoke, dose_time = "year", naive = FALSE)
+rbind(multiplicative = coef(fit), additive = coef(fit_add))
+```
+
+### The ERR model
+
+`model = "err"` fits the linear excess relative risk model exp(γ'Z)(1 + βx); the exposure
+coefficient is then the excess relative rate per unit of cumulative exposure:
+
+```{r, eval = FALSE}
+rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+    data = rrc_main, id = "id", validation = rrc_validation,
+    calibration = log(c) ~ log(dose) + smoke, dose_time = "year", model = "err")
+```
+
+It is not run here: the example data come from a Cox model with a steep exposure effect, and the
+linear ERR fit to them diverges (the estimate keeps increasing, as the data support a rate
+proportional to the exposure). `rrc()` then reports the fit as not converged.
+
+### Lagged exposure
+
+`rrcx(dose, lag = L)` uses only the doses received at least L time units before t. The validation
+risk set follows: a pair enters at t only if its dose was received before t − L.
+
+```{r}
+fit_lag <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate, lag = 5) + smoke,
+               data = rrc_main, id = "id", validation = rrc_validation,
+               calibration = log(c) ~ log(dose) + smoke, dose_time = "year", naive = FALSE)
+coef(fit_lag)
+```
+
+The data were generated without a lag, so the lagged exposure is misspecified here.
+
+## Standard errors
+
+The default variance is the sandwich estimator of Yang, Spiegelman and Wang, which adds to the
+main-study score the uncertainty of the calibration parameters estimated in each risk-set group.
+Other versions are kept in the fit:
+
+```{r}
+se <- function(type) sqrt(diag(vcov(fit, type = type)))
+rbind(sandwich = se("sandwich"),           # the default: the paper's sandwich
+      joint = se("joint"),                 # internal validation: a subject's two scores added first
+      main_only = se("main_only"),         # ignores the calibration uncertainty
+      model = se("model"))                 # inverse information, also ignores it
+```
+
+Ignoring the calibration uncertainty understates the standard error of the exposure effect.
+`variance = "bootstrap"` resamples subjects (with their validation pairs) instead:
+
+```{r}
+set.seed(1)
+fit_boot <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+                data = rrc_main, id = "id", validation = rrc_validation,
+                calibration = log(c) ~ log(dose) + smoke, dose_time = "year",
+                variance = "bootstrap", nboot = 50, naive = FALSE)
+rbind(sandwich = se("sandwich"), bootstrap = sqrt(diag(vcov(fit_boot))))
+```
+
+Use many more bootstrap samples (several hundred) in practice.
+
+## External validation studies
+
+When the validation subjects are not in the main study, their risk sets cannot be read from the
+main data. Give their own end of follow-up in `val_time`; a pair then belongs to the risk set of t
+when its subject's follow-up reaches t (and, with `dose_time`, its dose was received before t). In
+the main study every dose is then a surrogate:
+
+```{r, eval = FALSE}
+rrc(Surv(start, stop, event) ~ rrcx(dose) + smoke, data = main, id = "id",
+    validation = external, val_time = "end_of_followup", dose_time = "year",
+    calibration = log(c) ~ log(dose) + smoke)
+```
+
+## Practical notes
+
+- **Non-positive doses and the log model.** A multiplicative calibration needs c > 0 and C > 0.
+  Validation pairs with a non-positive value are dropped, with a warning. A non-positive surrogate
+  in the main study is an error unless `surrogate_floor` is given; with a small floor (e.g. 1e-8)
+  such a dose is raised to the floor and gets a calibrated value near 0.
+- **ERR fits** are restricted to 1 + βx > 0 for every subject at risk. When the estimate is on that
+  boundary, or keeps increasing (the data support a rate proportional to the exposure), the fit is
+  flagged as not converged and the summary says why.
+- **Speed.** The cost grows with the number of person-time rows times the number of event times.
+  A cohort of 6000 subjects with 55 yearly rows each and about 600 events takes a few seconds per
+  fit.
+
+## Reference
+
+Yang Y, Spiegelman D, Wang M. Survival analysis adjusting for measurement error in a cumulative
+total exposure variable: radon progeny to lung cancer mortality. Manuscript.

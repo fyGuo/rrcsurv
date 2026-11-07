@@ -23,8 +23,10 @@ The package is in development.
 
 ```r
 # install.packages("remotes")
-remotes::install_github("fyGuo/rrcsurv")
+remotes::install_github("fyGuo/rrcsurv", build_vignettes = TRUE)
 ```
+
+Then `vignette("rrcsurv")` walks through a full analysis of the example data.
 
 ## Usage
 
@@ -37,26 +39,36 @@ same name as the exposure. A subject may have pairs at several times; give each 
 (the end of the dose's interval, on the main study's time scale) in `dose_time`, so that the
 calibration at event time t uses only the doses received before t (before t - lag with a lag).
 
-```r
-library(rrcsurv)
-library(survival)
+With the example data that come with the package (`?rrc_main`): 1500 workers, yearly doses with
+multiplicative error that depends on smoking, and an internal validation study of 1159 worker-years.
 
-fit <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = is_estimated, lag = 5) + smoke,
-           data = main, id = "id",
-           validation = validation,              # columns id, c (true dose), dose (surrogate), year, ...
-           dose_time = "year",                   # when each validated dose was received
-           calibration = log(c) ~ log(dose),     # multiplicative error; use c ~ dose for additive
-           model = "err")
+```r
+library(rrcsurv)   # also exports Surv()
+
+fit <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+           data = rrc_main, id = "id",
+           validation = rrc_validation,               # columns id, year, c (true dose), dose (surrogate), smoke
+           dose_time = "year",                        # when each validated dose was received
+           calibration = log(c) ~ log(dose) + smoke,  # multiplicative error; c ~ dose + smoke for additive
+           model = "cox")                             # or "err"
 summary(fit)
 confint(fit)
 ```
 
-The uncorrected fit takes the same formula: `cumfit(Surv(start, stop, event) ~ rrcx(dose) + smoke, data = main, id = "id", model = "err")`.
+The data were generated with an exposure effect of 0.25: the naive fit gives 0.116, RRC 0.244 (SE
+0.023), and the fit on the true doses 0.245.
 
-See `?rrc`, `?"rrc-methods"` and `?cumfit`.
+The uncorrected fit takes the same formula: `cumfit(Surv(start, stop, event) ~ rrcx(dose) + smoke, data = rrc_main, id = "id")`.
+A lagged exposure is `rrcx(dose, surrogate = surrogate, lag = 5)`.
+
+See `vignette("rrcsurv")`, `?rrc`, `?"rrc-methods"` and `?cumfit`.
 
 ## Validation
 
 Without `dose_time`, the estimates and sandwich standard errors reproduce the reference code of the
-paper's Simulations 1 and 2 (`tests/testthat`; scripts and results in `dev/`). Monte Carlo coverage of
-the 95% sandwich intervals is 93-97% across the settings checked.
+paper's Simulations 1 and 2 (`tests/testthat`; scripts and results in `dev/`). With `dose_time`, the
+risk sets match a brute-force construction from the definition (`tests/testthat/test-dosetime.R`), and
+the reproductions of Simulations 1 (500 replicates x 12 settings) and 2 (500 replicates x 12 settings)
+in [measurementERROR_COX_ERR_RCC](https://github.com/fyGuo/measurementERROR_COX_ERR_RCC) run on it.
+Monte Carlo coverage of the 95% sandwich intervals is 93-97% in the `dev/` checks and 92-96% in
+Simulation 1, except 88% in its setting with independent, heavy-tailed multiplicative exposure.

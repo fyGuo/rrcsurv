@@ -3,3 +3,6 @@
 ^\.Rproj\.user$
 ^README\.md$
 ^\.gitignore$
+^data-raw$
+^doc$
+^Meta$

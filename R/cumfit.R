@@ -18,6 +18,21 @@
 #'   observed information) and in `variances` also the robust (Lin-Wei) sandwich, clustered by
 #'   subject. Methods: `coef()`, `vcov(type = c("model", "robust"))`, `confint()`, `nobs()`,
 #'   `summary()`, `print()`.
+#' @seealso [rrc()].
+#' @examples
+#' # naive analysis: surrogate doses taken at face value
+#' naive <- cumfit(Surv(start, stop, event) ~ rrcx(dose) + smoke, data = rrc_main, id = "id")
+#' summary(naive)
+#'
+#' # the example data also hold the true dose of every year (unknown in a real study)
+#' truth <- cumfit(Surv(start, stop, event) ~ rrcx(dose_true) + smoke, data = rrc_main, id = "id")
+#' coef(truth)
+#' vcov(truth, type = "robust")
+#'
+#' # lagged exposure: only doses received at least 5 years earlier count
+#' lagged <- cumfit(Surv(start, stop, event) ~ rrcx(dose_true, lag = 5) + smoke,
+#'                  data = rrc_main, id = "id")
+#' coef(lagged)
 #' @export
 cumfit <- function(formula, data, id, model = c("cox", "err"), start = NULL, control = list()) {
   cl <- match.call()

@@ -56,6 +56,23 @@
 #'   requested), and in `variances` the sandwich, its main-study part alone (ignoring the
 #'   uncertainty in the calibration parameters), the model-based inverse information, and the
 #'   bootstrap if requested.
+#' @seealso [cumfit()] for the uncorrected fit, [rrc-methods] for `summary()`, `vcov()` and
+#'   `confint()`, [rrc_main] for the example data, and `vignette("rrcsurv")`.
+#' @examples
+#' # internal validation study: validated years carry the true dose (surrogate = FALSE);
+#' # the measurement error depends on smoking, so smoke enters the calibration model
+#' fit <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+#'            data = rrc_main, id = "id", validation = rrc_validation,
+#'            calibration = log(c) ~ log(dose) + smoke, dose_time = "year")
+#' fit
+#' summary(fit)
+#' confint(fit)
+#'
+#' # additive error model; model = "err" would fit the linear ERR model instead
+#' fit_add <- rrc(Surv(start, stop, event) ~ rrcx(dose, surrogate = surrogate) + smoke,
+#'                data = rrc_main, id = "id", validation = rrc_validation,
+#'                calibration = c ~ dose + smoke, dose_time = "year")
+#' coef(fit_add)
 #' @export
 rrc <- function(formula, data, id, validation, calibration, model = c("cox", "err"),
                 min_pairs = 20, val_time = NULL, dose_time = NULL,

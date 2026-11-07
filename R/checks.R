@@ -34,6 +34,8 @@ show_some <- function(x, k = 5) {
 
 # Evaluate the Surv() response, turning its warnings (e.g. stop <= start) into errors
 eval_response <- function(formula, data, env) {
+  # Surv() is found even when survival is not attached (e.g. on parallel workers)
+  env <- list2env(list(Surv = survival::Surv), parent = env)
   y <- withCallingHandlers(eval(formula[[2]], data, env),
                            warning = function(w) {
                              stop("in the Surv() response: ", conditionMessage(w), call. = FALSE)
